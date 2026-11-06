@@ -1,3 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+
+/* Ações principais acompanham a marca; indicadores de sucesso continuam verdes. */
+@layer components {
+  button.bg-emerald-700, button.bg-emerald-600 {
+    @apply bg-amber-800;
+  }
+  button.bg-emerald-700:hover, button.bg-emerald-600:hover {
+    @apply bg-amber-900;
+  }
+}

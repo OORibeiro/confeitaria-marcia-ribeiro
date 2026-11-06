@@ -1,3 +1,4 @@
+import AlterarNome from './AlterarNome';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ShoppingBag,
@@ -22,11 +23,19 @@ import {
   ClipboardList,
   Settings
 } from 'lucide-react';
-import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, retornoSenha } from './supabase';
 import AdminPanel from './AdminPanel';
+import RecuperarSenha from './RecuperarSenha';
+import DetalhesEncomenda from './DetalhesEncomenda';
+import { SobreNos, Contato } from './PaginasInstitucionais';
 import { buscarCatalogo } from './catalogo';
 import { useCheckout } from './useCheckout';
 import PagamentoPedido from './PagamentoPedido';
+
+type Pagina = 'catalogo' | 'carrinho' | 'checkout' | 'acompanhamento' | 'conta' | 'admin' | 'sobre' | 'contato' | 'recuperar' | 'redefinir';
+const paginasPublicas: Record<string, Pagina> = {
+  '#catalogo': 'catalogo', '#sobre-nos': 'sobre', '#contato': 'contato', '#perfil': 'conta', '#carrinho': 'carrinho',
+};
 
 export interface VariacaoProduto {
   id_var: number;
@@ -72,7 +81,32 @@ export interface CotacaoFrete {
 }
 
 export default function App() {
-  const [abaAtiva, setAbaAtiva] = useState<'catalogo' | 'carrinho' | 'checkout' | 'acompanhamento' | 'conta' | 'admin'>('catalogo');
+  const [abaAtiva, setAbaAtiva] = useState<Pagina>(() => retornoSenha.solicitado ? 'redefinir' : paginasPublicas[window.location.hash] || 'catalogo');
+  const [usuarioRecuperacao, setUsuarioRecuperacao] = useState<string | null>(() => {
+    try { return sessionStorage.getItem('mr.recuperacao.usuario'); } catch { return null; }
+  });
+  function voltarDaSenha() {
+    const url = new URL(window.location.href); url.searchParams.delete('redefinir'); url.hash = 'perfil';
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    setAbaAtiva('conta');
+  }
+  useEffect(() => {
+    const navegar = () => {
+      const pagina = paginasPublicas[window.location.hash];
+      if (pagina) setAbaAtiva(pagina);
+    };
+    window.addEventListener('hashchange', navegar);
+    return () => window.removeEventListener('hashchange', navegar);
+  }, []);
+  useEffect(() => {
+    const hash = Object.keys(paginasPublicas).find(chave => paginasPublicas[chave] === abaAtiva);
+    // Preserva o retorno OAuth do Melhor Envio para o componente da integração.
+    if (hash && !/^#me_(state|code|erro)=/.test(window.location.hash)) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + hash);
+    }
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [abaAtiva]);
+
   const [produtos, setProdutos] = useState<ProdutoCatalogo[]>([]);
   const [variacaoEscolhidaPorProduto, setVariacaoEscolhidaPorProduto] = useState<Record<number, number>>({});
   const [usandoBancoReal, setUsandoBancoReal] = useState(false);
@@ -132,6 +166,12 @@ export default function App() {
   // Encomenda e PIX
   const [erroCheckout, setErroCheckout] = useState<string | null>(null);
 
+  const prazosPreparacao = carrinho.map(item => produtos
+    .find(p => p.id_prd === item.produto_id)?.variacoes
+    .find(v => v.id_var === item.variacao_id)?.prazo_producao_dias_uteis_var);
+  const maiorPrazoPreparacao = prazosPreparacao.length && prazosPreparacao.every(
+    prazo => prazo != null && Number.isInteger(Number(prazo)) && Number(prazo) >= 0
+  ) ? Math.max(...prazosPreparacao.map(Number)) : null;
   const totalPotes = carrinho.reduce((acc, item) => acc + item.quantidade, 0);
   const subtotalItens = carrinho.reduce((acc, item) => acc + item.preco_unitario * item.quantidade, 0);
   const chaveItensFrete = JSON.stringify(carrinho.map(item => ({
@@ -158,7 +198,7 @@ export default function App() {
     });
   },[checkout.pedido?.pedido_id,checkout.pedido?.status_pedido,checkout.pedido?.total]);
   useEffect(() => {
-    if (checkout.pedido) setAbaAtiva('acompanhamento');
+    if (checkout.pedido && !['recuperar', 'redefinir'].includes(abaAtiva)) setAbaAtiva('acompanhamento');
   },[checkout.pedido?.pedido_id]);
 
 
@@ -172,6 +212,16 @@ export default function App() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user ?? null;
       const proximoId = user?.id ?? null;
+      if (_event === 'PASSWORD_RECOVERY' || (_event === 'INITIAL_SESSION' && retornoSenha.tokenRecuperacao && !retornoSenha.erro && proximoId)) {
+        setUsuarioRecuperacao(proximoId);
+        try { if (proximoId) sessionStorage.setItem('mr.recuperacao.usuario', proximoId); } catch {}
+        setAbaAtiva('redefinir');
+      }
+      if (_event === 'SIGNED_OUT') {
+        setUsuarioRecuperacao(null);
+        try { sessionStorage.removeItem('mr.recuperacao.usuario'); } catch {}
+      }
+
       if (usuarioAtualRef.current !== proximoId) {
         usuarioAtualRef.current = proximoId;
         // O carrinho pertence à sessão atual; não acompanha outra identidade.
@@ -282,6 +332,15 @@ export default function App() {
       const resultado = await buscarCatalogo(supabase);
       if (versao !== cargaCatalogoRef.current) return;
       setProdutos(resultado.produtos);
+      // Reconciliar somente o carrinho local. Pedidos já criados permanecem intactos.
+      setCarrinho(atuais => atuais.flatMap(item => {
+        const produto = resultado.produtos.find(p => p.id_prd === item.produto_id);
+        const variacao = produto?.variacoes.find(v => v.id_var === item.variacao_id);
+        if (!produto || !variacao || variacao.disponivel_est <= 0) return [];
+        return [{ ...item, nome_produto: produto.nome_prd, nome_variacao: variacao.nome_var,
+          preco_unitario: variacao.preco_var, estoque_maximo: variacao.disponivel_est,
+          imagem: produto.imagem_prd || '', quantidade: Math.min(item.quantidade, variacao.disponivel_est) }];
+      }));
       setVariacaoEscolhidaPorProduto(resultado.selecaoInicial);
       setUsandoBancoReal(true);
     } catch (error: any) {
@@ -560,72 +619,49 @@ export default function App() {
 
       {/* Cabeçalho Principal */}
       <header className="bg-white/90 backdrop-blur-md sticky top-0 z-30 border-b border-amber-100 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 h-20 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 py-3 sm:py-0 sm:min-h-20 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={() => setAbaAtiva('catalogo')}
             className="text-left group focus:outline-none"
           >
             <span className="block text-xs uppercase tracking-widest text-amber-700 font-semibold">
-              Alta Confeitaria Artesanal
+              Confeitaria
             </span>
             <span className="text-2xl sm:text-3xl font-serif font-bold text-stone-900 group-hover:text-amber-800 transition-colors">
               Márcia Ribeiro
             </span>
           </button>
 
-          <nav className="flex items-center gap-2 sm:gap-3">
-            <button
-              onClick={() => setAbaAtiva('catalogo')}
-              className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
-                abaAtiva === 'catalogo'
-                  ? 'bg-amber-100 text-amber-900'
-                  : 'text-stone-600 hover:text-stone-900'
-              }`}
-            >
-              Catálogo
+          {ehAdmin && (
+            <button type="button" onClick={() => setAbaAtiva('admin')}
+              className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+              <Settings className="h-4 w-4" /> Painel Admin
             </button>
-
-            {/* Botão Painel Admin (se tiver permissão) */}
-            {ehAdmin && (
-              <button
-                onClick={() => setAbaAtiva('admin')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                  abaAtiva === 'admin'
-                    ? 'bg-amber-800 text-white border-amber-800'
-                    : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
-                }`}
-              >
-                <Settings className="w-4 h-4" />
-                <span className="hidden sm:inline">Painel Admin</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => setAbaAtiva('conta')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                abaAtiva === 'conta'
-                  ? 'bg-stone-900 text-white border-stone-900'
-                  : 'bg-white text-stone-700 border-stone-200 hover:border-amber-700'
-              }`}
-            >
-              <User className="w-4 h-4" />
-              <span className="hidden sm:inline">
-                {usuarioLogado
-                  ? (perfilCliente?.nome_clt?.split(' ')[0] || usuarioLogado.email?.split('@')[0])
-                  : 'Entrar / Registar'}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setAbaAtiva('carrinho')}
-              className="relative flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm"
-            >
-              <ShoppingBag className="w-4 h-4" />
-              <span className="hidden sm:inline">Carrinho</span>
-              <span className="bg-amber-100 text-amber-950 font-bold px-2 py-0.5 rounded-full text-xs">
-                {totalPotes}/10
-              </span>
-            </button>
+          )}
+        </div>
+        <div className="border-t border-stone-100">
+          <nav aria-label="Navegação principal" className="mx-auto flex max-w-6xl flex-wrap items-center gap-1 px-4 py-2 sm:gap-2">
+            {([
+              ['catalogo', '#catalogo', 'Catálogo'],
+              ['sobre', '#sobre-nos', 'Sobre nós'],
+              ['contato', '#contato', 'Contato'],
+              ['conta', '#perfil', 'Perfil'],
+              ['carrinho', '#carrinho', 'Carrinho'],
+            ] as const).map(([pagina, href, titulo]) => (
+              <a key={pagina} href={href} onClick={event => {
+                  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  if (window.location.hash !== href) window.history.pushState(null, '', href);
+                  setAbaAtiva(pagina);
+                }}
+                aria-current={abaAtiva === pagina ? 'page' : undefined}
+                className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700 ${abaAtiva === pagina ? 'bg-amber-800 text-white' : 'text-stone-600 hover:bg-amber-50 hover:text-amber-900'}`}>
+                {pagina === 'conta' && <User className="hidden h-4 w-4 sm:block" />}
+                {pagina === 'carrinho' && <ShoppingBag className="hidden h-4 w-4 sm:block" />}
+                {titulo}
+                {pagina === 'carrinho' && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-950">{totalPotes}/10</span>}
+              </a>
+            ))}
           </nav>
         </div>
       </header>
@@ -669,8 +705,16 @@ export default function App() {
         )}
 
         {/* ================= PAINEL ADMINISTRATIVO ================= */}
+        {(abaAtiva === 'recuperar' || abaAtiva === 'redefinir') && (
+          <RecuperarSenha key={abaAtiva + (usuarioLogado?.id || '')} modo={abaAtiva === 'recuperar' ? 'solicitar' : 'redefinir'}
+            autorizado={!retornoSenha.erro && !!usuarioLogado && usuarioRecuperacao === usuarioLogado.id}
+            verificando={inicializandoAuth} emailInicial={usuarioLogado?.email || emailLogin} aoVoltar={voltarDaSenha} />
+        )}
+        {abaAtiva === 'sobre' && <SobreNos verCatalogo={() => setAbaAtiva('catalogo')} />}
+        {abaAtiva === 'contato' && <Contato verPerfil={() => setAbaAtiva('conta')} />}
+
         {abaAtiva === 'admin' && ehAdmin && (
-          <AdminPanel />
+          <AdminPanel onProdutosAlterados={() => { invalidarFrete(); void carregarCatalogoDoSupabase(); }} />
         )}
 
         {/* ================= TELA DE LOGIN / CONTA ================= */}
@@ -683,7 +727,7 @@ export default function App() {
                     <User className="w-6 h-6" />
                   </div>
                   <h2 className="text-2xl font-serif font-bold text-stone-900">
-                    {modoCadastro ? 'Criar Conta' : 'Aceder à Conta'}
+                    {modoCadastro ? 'Criar Conta' : 'Acessar à Conta'}
                   </h2>
                   <p className="text-sm text-stone-500 mt-1">
                     {modoCadastro
@@ -814,14 +858,13 @@ export default function App() {
                     <span>{modoCadastro ? 'Criar Minha Conta' : 'Iniciar Sessão'}</span>
                   </button>
                 </form>
+                {!modoCadastro && <button type="button" onClick={() => setAbaAtiva('recuperar')}
+                  className="mt-4 text-sm font-semibold text-amber-900 underline">Esqueci minha senha</button>}
               </div>
             ) : (
               <div className="space-y-6">
                 <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 bg-amber-100 text-amber-900 rounded-full flex items-center justify-center font-serif font-bold text-xl">
-                      {(perfilCliente?.nome_clt || usuarioLogado.email || 'C')[0].toUpperCase()}
-                    </div>
                     <div>
                       <h2 className="text-xl font-serif font-bold text-stone-900">
                         Olá, {perfilCliente?.nome_clt || usuarioLogado.email}
@@ -829,6 +872,13 @@ export default function App() {
                       <p className="text-xs text-stone-500">
                         {usuarioLogado.email} {perfilCliente?.cpf_clt ? `• CPF: ${perfilCliente.cpf_clt}` : ''}
                       </p>
+                      <div className="mt-2 flex flex-wrap items-start gap-4">
+                        <button type="button" onClick={() => setAbaAtiva('recuperar')}
+                          className="inline-flex items-center justify-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 transition-colors hover:border-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2">Redefinir senha</button>
+                        {perfilCliente && <AlterarNome key={usuarioLogado.id} usuarioId={usuarioLogado.id}
+                          nomeAtual={perfilCliente.nome_clt || ''}
+                          onSalvo={nome => setPerfilCliente((atual: any) => atual ? { ...atual, nome_clt: nome } : atual)} />}
+                      </div>
                     </div>
                   </div>
 
@@ -857,7 +907,8 @@ export default function App() {
                   ) : (
                     <div className="divide-y divide-stone-100">
                       {meusPedidos.map(ped => (
-                        <div key={ped.id_pdd} className="py-4 flex items-center justify-between">
+                        <div key={usuarioLogado.id + '-' + ped.id_pdd} className="py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <span className="font-semibold text-stone-900 text-sm">
                               Encomenda #{ped.numero_pdd || ped.id_pdd}
@@ -882,6 +933,8 @@ export default function App() {
                               </span>
                             )}
                           </div>
+                        </div>
+                        <DetalhesEncomenda pedidoId={ped.id_pdd} usuarioId={usuarioLogado.id} />
                         </div>
                       ))}
                     </div>
@@ -1174,8 +1227,10 @@ export default function App() {
                                 {cot.company.name} - {cot.name}
                               </span>
                               <span className="block text-xs text-stone-500">
-                                Prazo estimado: {cot.delivery_time} {cot.delivery_time === 1 ? 'dia útil' : 'dias úteis'}
+                                Transporte estimado: {cot.delivery_time} {cot.delivery_time === 1 ? 'dia útil' : 'dias úteis'}
+                                {' · '}Preparação: {maiorPrazoPreparacao == null ? 'a confirmar' : maiorPrazoPreparacao + (maiorPrazoPreparacao === 1 ? ' dia útil' : ' dias úteis')}
                               </span>
+                              <span className="block text-xs text-stone-500">O transporte começa após a preparação. Consideramos o item com maior prazo.</span>
                             </div>
                           </div>
                           <span className="font-bold text-amber-900">
@@ -1382,3 +1437,4 @@ export default function App() {
     </div>
   );
 }
+

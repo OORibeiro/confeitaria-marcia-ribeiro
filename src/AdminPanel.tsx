@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import DetalhesEncomenda from './DetalhesEncomenda';
+import GestaoProdutos from './GestaoProdutos';
 import IntegracaoMelhorEnvio from './IntegracaoMelhorEnvio';
 import { supabase } from './supabase';
 import { 
@@ -27,7 +29,7 @@ const datasEtapas = [
   ['postado_em', 'Enviado'], ['entregue_em', 'Entregue'],
 ] as const;
 
-export default function AdminPanel() {
+export default function AdminPanel({ onProdutosAlterados }: { onProdutosAlterados: () => void }) {
   const [abaAtiva, setAbaAtiva] = useState<'pedidos' | 'produtos' | 'integracao'>(() => /^#me_(state|code|erro)=/.test(window.location.hash) ? 'integracao' : 'pedidos');
   
   // Estados de Pedidos
@@ -39,22 +41,6 @@ export default function AdminPanel() {
   const [envioPedido, setEnvioPedido] = useState<number | null>(null);
   const [codigoRastreio, setCodigoRastreio] = useState('');
   const operacao = useRef(false);
-
-  // Estados do Formulário de Produto
-  const [formProduto, setFormProduto] = useState({
-    nome_produto: '',
-    nome_variacao: 'Pote 200g',
-    preco: '18.90',
-    peso_kg: '0.200',
-    validade_dias: '7',
-    prazo_dias_uteis: '2',
-    tem_lactose: true,
-    tem_gluten: true,
-    estoque_inicial: '20',
-    descricao_produto: ''
-  });
-  const [msgProduto, setMsgProduto] = useState<{ texto: string; tipo: 'sucesso' | 'erro' } | null>(null);
-  const [salvandoProduto, setSalvandoProduto] = useState(false);
 
   useEffect(() => {
     if (abaAtiva === 'pedidos') {
@@ -118,38 +104,6 @@ export default function AdminPanel() {
     }
   }
 
-  async function cadastrarProduto(e: React.FormEvent) {
-    e.preventDefault();
-    setMsgProduto(null);
-    if (!supabase) return;
-
-    setSalvandoProduto(true);
-    try {
-      const { error } = await supabase.rpc('cadastrar_produto_com_variacao', {
-        p_nome_produto: formProduto.nome_produto,
-        p_nome_variacao: formProduto.nome_variacao,
-        p_preco: Number(formProduto.preco),
-        p_peso_kg: Number(formProduto.peso_kg),
-        p_validade_dias: Number(formProduto.validade_dias),
-        p_prazo_dias_uteis: Number(formProduto.prazo_dias_uteis),
-        p_tem_lactose: formProduto.tem_lactose,
-        p_tem_gluten: formProduto.tem_gluten,
-        p_estoque_inicial: Number(formProduto.estoque_inicial),
-        p_descricao_produto: formProduto.descricao_produto || null
-      });
-
-      if (error) throw error;
-      
-      setMsgProduto({ texto: 'Produto cadastrado com sucesso no Supabase!', tipo: 'sucesso' });
-      // Limpa o formulário
-      setFormProduto({ ...formProduto, nome_produto: '', descricao_produto: '' });
-    } catch (err: any) {
-      setMsgProduto({ texto: err.message, tipo: 'erro' });
-    } finally {
-      setSalvandoProduto(false);
-    }
-  }
-
   return (
     <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden animate-in fade-in duration-300">
       {/* Menu Superior do Admin */}
@@ -157,7 +111,7 @@ export default function AdminPanel() {
         <button
           onClick={() => setAbaAtiva('pedidos')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
-            abaAtiva === 'pedidos' ? 'bg-amber-500 text-stone-900' : 'text-stone-300 hover:bg-stone-800'
+            abaAtiva === 'pedidos' ? 'bg-amber-700 text-white' : 'text-stone-300 hover:bg-stone-800'
           }`}
         >
           <ClipboardList className="w-4 h-4" /> Gestão de Pedidos
@@ -165,12 +119,12 @@ export default function AdminPanel() {
         <button
           onClick={() => setAbaAtiva('produtos')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
-            abaAtiva === 'produtos' ? 'bg-amber-500 text-stone-900' : 'text-stone-300 hover:bg-stone-800'
+            abaAtiva === 'produtos' ? 'bg-amber-700 text-white' : 'text-stone-300 hover:bg-stone-800'
           }`}
         >
-          <Plus className="w-4 h-4" /> Cadastrar Produtos
+          <Plus className="w-4 h-4" /> Gestão de Produtos
         </button>
-        <button onClick={() => setAbaAtiva('integracao')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${abaAtiva === 'integracao' ? 'bg-amber-500 text-stone-900' : 'text-stone-300 hover:bg-stone-800'}`}>Melhor Envio</button>
+        <button onClick={() => setAbaAtiva('integracao')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${abaAtiva === 'integracao' ? 'bg-amber-700 text-white' : 'text-stone-300 hover:bg-stone-800'}`}>Melhor Envio</button>
       </div>
 
       <div className="p-6">
@@ -209,7 +163,7 @@ export default function AdminPanel() {
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {pedidos.map(ped => (
-                      <tr key={ped.id_pdd} className="hover:bg-stone-50 transition-colors">
+                      <React.Fragment key={ped.id_pdd}><tr className="hover:bg-stone-50 transition-colors">
                         <td className="py-4 px-2">
                           <span className="font-bold text-stone-900">#{ped.numero_pdd || ped.id_pdd}</span>
                           <span className="block text-xs text-stone-500">{new Date(ped.data_pdd).toLocaleDateString('pt-BR')}</span>
@@ -264,6 +218,10 @@ export default function AdminPanel() {
                           </div>
                         </td>
                       </tr>
+                      <tr><td colSpan={5} className="px-2 pb-4">
+                        <DetalhesEncomenda pedidoId={ped.id_pdd} usuarioId="admin" administrador />
+                      </td></tr>
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -272,111 +230,9 @@ export default function AdminPanel() {
           </div>
         )}
 
-        {/* ABA: CADASTRAR PRODUTOS */}
-        {abaAtiva === 'produtos' && (
-          <div className="max-w-2xl mx-auto">
-            <h2 className="text-xl font-serif font-bold text-stone-900 mb-6">Cadastrar Novo Doce</h2>
-            
-            <form onSubmit={cadastrarProduto} className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">Nome do Produto *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Bolo de Pote Prestígio"
-                    value={formProduto.nome_produto}
-                    onChange={e => setFormProduto({ ...formProduto, nome_produto: e.target.value })}
-                    className="w-full border border-stone-300 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">Nome da Variação *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Pote 200g"
-                    value={formProduto.nome_variacao}
-                    onChange={e => setFormProduto({ ...formProduto, nome_variacao: e.target.value })}
-                    className="w-full border border-stone-300 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">Preço (R$) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={formProduto.preco}
-                    onChange={e => setFormProduto({ ...formProduto, preco: e.target.value })}
-                    className="w-full border border-stone-300 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">Peso (kg) *</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    required
-                    value={formProduto.peso_kg}
-                    onChange={e => setFormProduto({ ...formProduto, peso_kg: e.target.value })}
-                    className="w-full border border-stone-300 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">Validade (dias) *</label>
-                  <input
-                    type="number"
-                    required
-                    value={formProduto.validade_dias}
-                    onChange={e => setFormProduto({ ...formProduto, validade_dias: e.target.value })}
-                    className="w-full border border-stone-300 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">Estoque Inicial *</label>
-                  <input
-                    type="number"
-                    required
-                    value={formProduto.estoque_inicial}
-                    onChange={e => setFormProduto({ ...formProduto, estoque_inicial: e.target.value })}
-                    className="w-full border border-stone-300 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-600 mb-1">Descrição do Produto</label>
-                <textarea
-                  rows={3}
-                  placeholder="Descreva os ingredientes e detalhes para o cliente..."
-                  value={formProduto.descricao_produto}
-                  onChange={e => setFormProduto({ ...formProduto, descricao_produto: e.target.value })}
-                  className="w-full border border-stone-300 rounded-xl px-3.5 py-2.5 text-sm"
-                />
-              </div>
-
-              {msgProduto && (
-                <div className={`p-4 rounded-xl text-sm font-medium ${msgProduto.tipo === 'sucesso' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
-                  {msgProduto.texto}
-                </div>
-              )}
-
-              <button 
-                type="submit" 
-                disabled={salvandoProduto}
-                className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-stone-400 text-white px-6 py-3.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
-              >
-                {salvandoProduto ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-                Salvar Produto
-              </button>
-            </form>
-          </div>
-        )}
+        {abaAtiva === 'produtos' && <GestaoProdutos onAlterado={onProdutosAlterados} />}
       </div>
     </div>
   );
 }
+

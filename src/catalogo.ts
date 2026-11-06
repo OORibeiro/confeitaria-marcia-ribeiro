@@ -5,8 +5,8 @@ import type { ProdutoCatalogo, VariacaoProduto } from './App';
 // Não ampliar as permissões do banco para acomodar um select('*').
 export async function buscarCatalogo(client: SupabaseClient) {
   const [produtos, variacoes, estoque] = await Promise.all([
-    client.from('Produto').select('*').order('id_prd'),
-    client.from('Produto_Variacao').select('*').order('id_var'),
+    client.from('Produto').select('*').eq('ativo_prd', true).order('id_prd'),
+    client.from('Produto_Variacao').select('*').eq('ativo_var', true).order('id_var'),
     client.from('Estoque').select('id_prd_fk,id_var_fk,disponivel_est'),
   ]);
 
@@ -50,3 +50,4 @@ export async function buscarCatalogo(client: SupabaseClient) {
 
   return { produtos: catalogo, selecaoInicial };
 }
+
