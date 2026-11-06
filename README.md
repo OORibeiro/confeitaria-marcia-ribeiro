@@ -18,5 +18,3 @@ Projeto completo em **React + Vite + TypeScript + Tailwind CSS** configurado par
    ```
 5. O site abrirá em `http://localhost:5173`.
 
-## Ajuste Importante no Supabase (`supabase_ajustes/salvar_frete_pedido.sql`)
-Dentro da pasta `supabase_ajustes`, deixei o script SQL da função `salvar_frete_pedido_cliente` para você rodar no **SQL Editor** do Supabase. Ela preenche o `frete_ent` na tabela `Pedido_Entrega` antes de chamar a sua função `checkout-pix-cliente-teste`.
