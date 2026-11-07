@@ -1163,7 +1163,7 @@ export default function App() {
                       type="text"
                       value={cepDestino}
                       onChange={e => { invalidarFrete(); setCepDestino(e.target.value); }}
-                      placeholder="Introduza o seu CEP (ex: 11703340)"
+                      placeholder="Digite seu CEP (00000-000)"
                       maxLength={9}
                       className="flex-grow border border-stone-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
                     />
